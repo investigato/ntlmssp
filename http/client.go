@@ -230,9 +230,15 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(b))
 
 		if req.Body != nil {
-			req.Body = ioutil.NopCloser(&body)
+			req.Body = io.NopCloser(&body)
 		}
 
+		// After AUTHENTICATE (i==1), session key is established and can be used to encrypt now
+		if i == 1 {
+			if err := c.wrap(req); err != nil {
+				return nil, err
+			}
+		}
 		c.logger.Info("request", req)
 
 		resp, err = c.http.Do(req)
@@ -241,6 +247,13 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 
 		if resp.StatusCode != http.StatusUnauthorized {
+			// Attempt to decrypt if session is encrypted
+			if i == 1 {
+				if err := c.unwrap(resp); err != nil {
+					return nil, err
+				}
+			}
+
 			return resp, nil
 		}
 	}
