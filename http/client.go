@@ -184,9 +184,11 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			return nil, err
 		}
 		resp, err = c.http.Do(req)
+
 		if err != nil {
 			return nil, err
 		}
+		fmt.Printf("statusCode: %d\n", resp.StatusCode)
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
 		}
