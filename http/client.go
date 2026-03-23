@@ -180,6 +180,8 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		if err != nil {
 			return nil, err
 		}
+		// need to actually put something there...
+		req.Body = io.NopCloser(bytes.NewReader(savedBody))
 	}
 	contentType := req.Header.Get(contentTypeHeader)
 	//There are 2 paths through this function:
