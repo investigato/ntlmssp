@@ -30,11 +30,6 @@ type Client struct {
 	logger     logr.Logger
 }
 
-type teeReadCloser struct {
-	io.Reader
-	io.Closer
-}
-
 func NewClient(httpClient *http.Client, ntlmClient *ntlmssp.Client, options ...func(*Client) error) (*Client, error) {
 	if httpClient == nil {
 		httpClient = cleanhttp.DefaultClient()
@@ -204,9 +199,11 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			c.ntlm.Reset()
-		} else if c.encryption {
-			if err := c.unwrap(resp); err != nil {
-				return nil, err
+		} else {
+			if c.encryption {
+				if err := c.unwrap(resp); err != nil {
+					return nil, err
+				}
 			}
 			return resp, nil
 		}
