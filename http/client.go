@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/cookiejar"
 	"net/textproto"
@@ -114,7 +113,7 @@ func (c *Client) wrap(req *http.Request) error {
 			return errors.New("no Content-Type header")
 		}
 
-		body, err := ioutil.ReadAll(req.Body)
+		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			return err
 		}
@@ -132,7 +131,7 @@ func (c *Client) wrap(req *http.Request) error {
 			return err
 		}
 
-		req.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+		req.Body = io.NopCloser(bytes.NewBuffer(body))
 		req.Header.Set(contentTypeHeader, newContentType)
 	}
 
@@ -147,7 +146,7 @@ func (c *Client) unwrap(resp *http.Response) error {
 			return errors.New("no Content-Type header")
 		}
 
-		sealed, err := ioutil.ReadAll(resp.Body)
+		sealed, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
@@ -168,7 +167,7 @@ func (c *Client) unwrap(resp *http.Response) error {
 			return err
 		}
 
-		resp.Body = ioutil.NopCloser(bytes.NewBuffer(body))
+		resp.Body = io.NopCloser(bytes.NewBuffer(body))
 		resp.Header.Set(contentTypeHeader, newContentType)
 		resp.Header.Set("Content-Length", fmt.Sprint(len(body)))
 	}
@@ -176,22 +175,43 @@ func (c *Client) unwrap(resp *http.Response) error {
 	return nil
 }
 
+// refactor all the things!
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
-
-	// Potentially replace the request body with a signed and sealed copy
-	if err := c.wrap(req); err != nil {
-		return nil, err
+	//There are 2 paths through this function:
+	//Fast path — c.ntlm.Complete() is true (already authenticated)
+	if c.ntlm.Complete() {
+		if err := c.wrap(req); err != nil {
+			return nil, err
+		}
+		resp, err = c.http.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.unwrap(resp); err != nil {
+			return nil, err
+		}
+		return resp, nil
 	}
-
-	var body bytes.Buffer
+	c.logger.Info("request", req)
+	//Regular path auth it up!
+	//1. Read and save the original body bytes and Content-Type header before touching anything
+	var savedBody []byte
 
 	if req.Body != nil {
-		tr := io.TeeReader(req.Body, &body)
-		req.Body = teeReadCloser{tr, req.Body}
+		savedBody, err = io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
 	}
+	contentType := req.Header.Get(contentTypeHeader)
+	//2. Set req.Body = nil (and req.ContentLength = 0) strip the body for the auth dance
 
+	req.Body = nil
+	req.ContentLength = 0
+	req.GetBody = nil
 	c.logger.Info("request", req)
 
+	//3. Send the initial unauthenticated request → expect 401
 	resp, err = c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -205,9 +225,9 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 
 		return resp, nil
 	}
-
-	for i := 0; i < 2; i++ {
-
+	//4. Loop twice:
+	for _ = range [2]int{} {
+		//- Extract Negotiate token from response header
 		ok, input, err := isAuthenticationMethod(resp.Header, "Negotiate")
 		if err != nil {
 			return nil, err
@@ -222,46 +242,65 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		if c.sendCBT && resp.TLS != nil {
 			cbt = generateChannelBindings(resp.TLS.PeerCertificates[0]) // Presume it's the first one?
 		}
-
+		//- Call c.ntlm.Authenticate(input, cbt) to get next token
 		b, err := c.ntlm.Authenticate(input, cbt)
 		if err != nil {
 			return nil, err
 		}
+
+		//- Set Authorization: Negotiate <token>
 		req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(b))
 
-		if req.Body != nil {
-			req.Body = io.NopCloser(&body)
-		}
+		// Drain and close the previous response body before the next send this is YUUUUUUGE
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
 
-		// After AUTHENTICATE (i==1), session key is established and can be used to encrypt now
-		if i == 1 {
-			if err := c.wrap(req); err != nil {
-				return nil, err
-			}
-		}
 		c.logger.Info("request", req)
 
+		//- Send with nil body
 		resp, err = c.http.Do(req)
 		if err != nil {
 			return nil, err
 		}
-
+		//- If not 401: break (AUTHENTICATE got 200)
 		if resp.StatusCode != http.StatusUnauthorized {
-			// Attempt to decrypt if session is encrypted
-			if i == 1 {
-				if err := c.unwrap(resp); err != nil {
-					return nil, err
-				}
-			}
-
-			return resp, nil
+			break
 		}
 	}
+	//5. After loop: drain and close final auth response body
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 
+	//6. Restore previous req.Body
+	req.Body = io.NopCloser(bytes.NewReader(savedBody))
+
+	//7. Update the content-lenth to -1 to force chunked encoding (this is what evil-winrm-py does, and it seems to be required for the final payload request to work properly)
+	req.ContentLength = -1
+	//8. Restore original Content-Type header
+	req.Header.Set(contentTypeHeader, contentType)
+	//9. Delete the Authorization header, a first authenticated request has no header
+	req.Header.Del("Authorization")
+	//10. wrap it up
+	if err := c.wrap(req); err != nil {
+		return nil, err
+	}
+	c.logger.Info("request", req)
+	//11. this is the real payload request
+	resp, err = c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	//12. unwrap the response if necessary and inspect
+	if c.ntlm.Complete() && c.encryption {
+		if err := c.unwrap(resp); err != nil {
+			return nil, err
+		}
+	}
+	//13. Return
 	return resp, nil
 }
 
-func isAuthenticationMethod(headers http.Header, method string) (bool, []byte, error) {
+func isAuthenticationMethod(headers http.Header, method string) (ok bool, token []byte, err error) {
 	if h, ok := headers[httpAuthenticateHeader]; ok {
 		for _, x := range h {
 			if x == method {
