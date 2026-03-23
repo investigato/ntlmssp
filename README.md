@@ -12,6 +12,6 @@ Feature comparison:
 
 | Library                                        | NTLMv1 | NTLMv2 | Connection-orientated | Connectionless | Signing & sealing | Channel Bindings | Client | Server | Notes     |
 | ---------------------------------------------- |:------:|:------:|:---------------------:|:--------------:|:-----------------:|:----------------:|:------:|:------:| --------- |
-| https://github.com/bodgit/ntlmssp              | Yes    | Yes    | Yes                   | No             | Yes               | Yes              | Yes    | No     |           |
+| https://github.com/investigato/ntlmssp              | Yes    | Yes    | Yes                   | No             | Yes               | Yes              | Yes    | No     |           |
 | https://github.com/Azure/go-ntlmssp            | No     | Yes    | Yes                   | No             | No                | No               | Yes    | No     | HTTP only |
 | https://github.com/ThomsonReutersEikon/go-ntlm | Yes    | Yes    | No                    | Yes            | No                | No               | Yes    | Yes    | Archived  |

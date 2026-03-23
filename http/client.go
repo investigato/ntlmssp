@@ -14,9 +14,9 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/bodgit/ntlmssp"
 	"github.com/go-logr/logr"
 	"github.com/hashicorp/go-cleanhttp"
+	"github.com/investigato/ntlmssp"
 )
 
 var (
