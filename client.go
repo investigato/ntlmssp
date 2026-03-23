@@ -265,3 +265,14 @@ func (c *Client) Complete() bool {
 func (c *Client) SecuritySession() *SecuritySession {
 	return c.securitySession
 }
+
+// add Reset() method that clears only session state, not credentials/config:
+//   - Zero out: complete, securitySession, negotiateMessage, challengeMessage, negotiatedFlags
+//   - Leave untouched: username, password, domain, workstation, defaultFlags, version, compatibilityLevel
+func (c *Client) Reset() {
+	c.complete = false
+	c.securitySession = nil
+	c.negotiateMessage = nil
+	c.challengeMessage = nil
+	c.negotiatedFlags = 0
+}

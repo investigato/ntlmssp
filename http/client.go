@@ -178,26 +178,6 @@ func (c *Client) unwrap(resp *http.Response) error {
 
 // refactor all the things!
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
-	//There are 2 paths through this function:
-	//Fast path — c.ntlm.Complete() is true (already authenticated)
-	if c.ntlm.Complete() {
-		if err := c.wrap(req); err != nil {
-			return nil, err
-		}
-		resp, err = c.http.Do(req)
-
-		if err != nil {
-			return nil, err
-		}
-
-		if err := c.unwrap(resp); err != nil {
-			return nil, err
-		}
-		return resp, nil
-	}
-	c.logger.Info("request", req)
-	//Regular path auth it up!
-	//1. Read and save the original body bytes and Content-Type header before touching anything
 	var savedBody []byte
 
 	if req.Body != nil {
@@ -207,6 +187,34 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 	}
 	contentType := req.Header.Get(contentTypeHeader)
+	//There are 2 paths through this function:
+	//Fast path — c.ntlm.Complete() is true (already authenticated)
+
+	if c.ntlm.Complete() {
+		if err := c.wrap(req); err != nil {
+			return nil, err
+		}
+		resp, err = c.http.Do(req)
+
+		if err != nil {
+			return nil, err
+		}
+		//if response is 401, drain+close body, call c.ntlm.Reset(), then use the regular path with the saved body and content-type to re-authenticate and resend the request
+		if resp.StatusCode == http.StatusUnauthorized {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			c.ntlm.Reset()
+		} else if c.encryption {
+			if err := c.unwrap(resp); err != nil {
+				return nil, err
+			}
+			return resp, nil
+		}
+	}
+	c.logger.Info("request", req)
+	//Regular path auth it up!
+	//1. Read and save the original body bytes and Content-Type header before touching anything
+
 	//2. Set req.Body = nil (and req.ContentLength = 0) strip the body for the auth dance
 
 	req.Body = nil
