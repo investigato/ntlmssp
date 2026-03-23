@@ -125,8 +125,8 @@ func (c *Client) wrap(req *http.Request) error {
 
 		length := make([]byte, 4)
 		binary.LittleEndian.PutUint32(length, uint32(len(signature)))
-		
 
+		// this was originally sending length of the combined payload which led to it being off by 20 bytes (4 bytes for the length field + 16 bytes for the signature)
 		body, newContentType, err := Wrap(concat(length, signature, sealed), contentType, bodyLength)
 		if err != nil {
 			return err
@@ -189,7 +189,7 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		if err != nil {
 			return nil, err
 		}
-		fmt.Printf("statusCode: %d\n", resp.StatusCode)
+
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
 		}
@@ -295,8 +295,7 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	}
 	//12. unwrap the response if necessary and inspect
 	if c.ntlm.Complete() && c.encryption {
-		// DEBUG
-		fmt.Printf("resp.StatusCode=%d\n", resp.StatusCode)
+
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
 		}
