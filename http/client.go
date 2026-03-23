@@ -142,8 +142,8 @@ func (c *Client) unwrap(resp *http.Response) error {
 	if session := c.ntlm.SecuritySession(); c.ntlm.Complete() && c.encryption && session != nil && resp.Body != nil {
 
 		contentType := resp.Header.Get(contentTypeHeader)
-		if contentType == "" {
-			return errors.New("no Content-Type header")
+		if contentType == "" || !strings.HasPrefix(contentType, "multipart/encrypted") {
+			return nil
 		}
 
 		sealed, err := io.ReadAll(resp.Body)
@@ -292,6 +292,8 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	}
 	//12. unwrap the response if necessary and inspect
 	if c.ntlm.Complete() && c.encryption {
+		// DEBUG
+		fmt.Printf("resp.StatusCode=%d\n", resp.StatusCode)
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
 		}
