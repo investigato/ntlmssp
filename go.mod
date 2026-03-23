@@ -1,4 +1,4 @@
-module github.com/bodgit/ntlmssp
+module github.com/investigato/ntlmssp
 
 go 1.18
 
