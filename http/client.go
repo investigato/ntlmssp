@@ -69,7 +69,9 @@ func NewClient(httpClient *http.Client, ntlmClient *ntlmssp.Client, options ...f
 
 	return c, nil
 }
-
+func (c *Client) RoundTrip(req *http.Request) (*http.Response, error) {
+	return c.Do(req)
+}
 func (c *Client) SetOption(options ...func(*Client) error) error {
 	for _, option := range options {
 		if err := option(c); err != nil {
