@@ -287,7 +287,7 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	req.Body = io.NopCloser(bytes.NewReader(savedBody))
 
 	//7. Update the content-lenth to -1 to force chunked encoding (this is what evil-winrm-py does, and it seems to be required for the final payload request to work properly)
-	req.ContentLength = -1
+	// req.ContentLength = -1
 	//8. Restore original Content-Type header
 	req.Header.Set(contentTypeHeader, contentType)
 	//9. Delete the Authorization header, a first authenticated request has no header
