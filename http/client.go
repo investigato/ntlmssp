@@ -280,7 +280,10 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 	}
 	//5. After loop: drain and close final auth response body
-	io.Copy(io.Discard, resp.Body)
+	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+		return nil, err
+	}
+
 	resp.Body.Close()
 
 	//6. Restore previous req.Body
@@ -296,8 +299,19 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	if err := c.wrap(req); err != nil {
 		return nil, err
 	}
+	// reset the content-length to the correct value
+	if req.Body != nil {
+		if seeker, ok := req.Body.(io.Seeker); ok {
+			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		req.ContentLength = -1
+	}
 	c.logger.Info("request", req)
 	//11. this is the real payload request
+	req.Header.Del("Transfer-Encoding") // chunked encoding doesn't work with NTLM, so remove it if it's there to force the http client to calculate and set a Content-Length header instead
 	resp, err = c.http.Do(req)
 	if err != nil {
 		return nil, err
