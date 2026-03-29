@@ -130,6 +130,7 @@ func (c *Client) wrap(req *http.Request) error {
 		}
 
 		req.Body = io.NopCloser(bytes.NewBuffer(body))
+		req.ContentLength = int64(len(body))
 		req.Header.Set(contentTypeHeader, newContentType)
 	}
 
@@ -185,9 +186,6 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		// need to actually put something there...
 		req.Body = io.NopCloser(bytes.NewReader(savedBody))
 	}
-	contentType := req.Header.Get(contentTypeHeader)
-	//There are 2 paths through this function:
-	//Fast path — c.ntlm.Complete() is true (already authenticated)
 
 	if c.ntlm.Complete() {
 		if err := c.wrap(req); err != nil {
@@ -200,8 +198,15 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 		//if response is 401, drain+close body, call c.ntlm.Reset(), then use the regular path with the saved body and content-type to re-authenticate and resend the request
 		if resp.StatusCode == http.StatusUnauthorized {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
+			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+				if err = resp.Body.Close(); err != nil {
+					return nil, err
+				}
+				return nil, err
+			}
+			if err := resp.Body.Close(); err != nil {
+				return nil, err
+			}
 			c.ntlm.Reset()
 		} else {
 			if c.encryption {
@@ -213,17 +218,10 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 	}
 	c.logger.Info("request", req)
-	//Regular path auth it up!
-	//1. Read and save the original body bytes and Content-Type header before touching anything
 
-	//2. Set req.Body = nil (and req.ContentLength = 0) strip the body for the auth dance
+	req.Body = io.NopCloser(bytes.NewReader(savedBody))
+	req.ContentLength = int64(len(savedBody))
 
-	req.Body = nil
-	req.ContentLength = 0
-	req.GetBody = nil
-	c.logger.Info("request", req)
-
-	//3. Send the initial unauthenticated request → expect 401
 	resp, err = c.http.Do(req)
 	if err != nil {
 		return nil, err
@@ -264,12 +262,22 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		req.Header.Set("Authorization", "Negotiate "+base64.StdEncoding.EncodeToString(b))
 
 		// Drain and close the previous response body before the next send this is YUUUUUUGE
-		io.Copy(io.Discard, resp.Body)
-		resp.Body.Close()
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			if err = resp.Body.Close(); err != nil {
+				return nil, err
+			}
+
+			return nil, err
+		}
+		if err := resp.Body.Close(); err != nil {
+			return nil, err
+		}
 
 		c.logger.Info("request", req)
 
 		//- Send with nil body
+		req.Body = io.NopCloser(bytes.NewReader(savedBody))
+		req.ContentLength = int64(len(savedBody))
 		resp, err = c.http.Do(req)
 		if err != nil {
 			return nil, err
@@ -279,51 +287,11 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			break
 		}
 	}
-	//5. After loop: drain and close final auth response body
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return nil, err
-	}
-
-	resp.Body.Close()
-
-	//6. Restore previous req.Body
-	req.Body = io.NopCloser(bytes.NewReader(savedBody))
-
-	//7. Update the content-lenth to -1 to force chunked encoding (this is what evil-winrm-py does, and it seems to be required for the final payload request to work properly)
-	// req.ContentLength = -1
-	//8. Restore original Content-Type header
-	req.Header.Set(contentTypeHeader, contentType)
-	//9. Delete the Authorization header, a first authenticated request has no header
-	req.Header.Del("Authorization")
-	//10. wrap it up
-	if err := c.wrap(req); err != nil {
-		return nil, err
-	}
-	// reset the content-length to the correct value
-	if req.Body != nil {
-		if seeker, ok := req.Body.(io.Seeker); ok {
-			if _, err := seeker.Seek(0, io.SeekStart); err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		req.ContentLength = -1
-	}
-	c.logger.Info("request", req)
-	//11. this is the real payload request
-	req.Header.Del("Transfer-Encoding") // chunked encoding doesn't work with NTLM, so remove it if it's there to force the http client to calculate and set a Content-Length header instead
-	resp, err = c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	//12. unwrap the response if necessary and inspect
 	if c.ntlm.Complete() && c.encryption {
-
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
 		}
 	}
-	//13. Return
 	return resp, nil
 }
 
