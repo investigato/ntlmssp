@@ -278,6 +278,12 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		//- Send with nil body
 		req.Body = io.NopCloser(bytes.NewReader(savedBody))
 		req.ContentLength = int64(len(savedBody))
+		if c.ntlm.Complete() && c.encryption {
+			if err := c.wrap(req); err != nil {
+				return nil, err
+			}
+		}
+
 		resp, err = c.http.Do(req)
 		if err != nil {
 			return nil, err

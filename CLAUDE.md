@@ -40,6 +40,6 @@ Auth flow in Do():
 3. Loop ≤2 times: extract token → Authenticate() → set Authorization header → drain body → reset body+ContentLength → send → break on non-401
 4. Return auth-200 directly — it IS the real response, no third request
 
-Encryption — wrap()/unwrap() use multipart/encrypted MIME. Off for testing_ in merton (NTLMAuth sets Encryption(false)) and will be changed back before release.
+Encryption — wrap()/unwrap() use multipart/encrypted MIME
 
 Requirement: keep-alives must be enabled; NTLM is connection-oriented.
