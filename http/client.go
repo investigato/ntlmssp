@@ -176,38 +176,28 @@ func (c *Client) unwrap(resp *http.Response) error {
 
 // refactor all the things!
 func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
-	var savedBody []byte
-
-	if req.Body != nil {
-		savedBody, err = io.ReadAll(req.Body)
-		if err != nil {
-			return nil, err
-		}
-		// need to actually put something there...
-		req.Body = io.NopCloser(bytes.NewReader(savedBody))
+	savedBody, err := saveBody(req)
+	if err != nil {
+		return nil, err
 	}
+	originalContentType := req.Header.Get(contentTypeHeader)
 
 	if c.ntlm.Complete() {
 		if err := c.wrap(req); err != nil {
 			return nil, err
 		}
 		resp, err = c.http.Do(req)
-
 		if err != nil {
-			return nil, err
-		}
-		//if response is 401, drain+close body, call c.ntlm.Reset(), then use the regular path with the saved body and content-type to re-authenticate and resend the request
-		if resp.StatusCode == http.StatusUnauthorized {
-			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-				if err = resp.Body.Close(); err != nil {
-					return nil, err
-				}
+			if !isConnectionError(err) {
 				return nil, err
 			}
-			if err := resp.Body.Close(); err != nil {
+			// connection error: fall through to reset + re-auth
+		} else if resp.StatusCode == http.StatusUnauthorized ||
+			resp.StatusCode == http.StatusBadRequest {
+			if err := emptyAndCloseBody(resp.Body); err != nil {
 				return nil, err
 			}
-			c.ntlm.Reset()
+			// fall through to reset + re-auth
 		} else {
 			if c.encryption {
 				if err := c.unwrap(resp); err != nil {
@@ -216,18 +206,17 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			}
 			return resp, nil
 		}
+		c.ntlm.Reset()
+		req.Body = io.NopCloser(bytes.NewReader(savedBody))
+		req.ContentLength = int64(len(savedBody))
+		req.Header.Set(contentTypeHeader, originalContentType)
 	}
-	c.logger.Info("request", req)
-
-	req.Body = io.NopCloser(bytes.NewReader(savedBody))
-	req.ContentLength = int64(len(savedBody))
-
 	resp, err = c.http.Do(req)
 	if err != nil {
 		return nil, err
 	}
 
-	if c.ntlm.Complete() || resp.StatusCode != http.StatusUnauthorized {
+	if resp.StatusCode != http.StatusUnauthorized {
 		// Potentially unseal and check signature
 		if err := c.unwrap(resp); err != nil {
 			return nil, err
@@ -299,6 +288,33 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		}
 	}
 	return resp, nil
+}
+
+func saveBody(req *http.Request) ([]byte, error) {
+	if req.Body == nil {
+		return nil, nil
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, err
+	}
+	// need to actually put something there...
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
+}
+
+func emptyAndCloseBody(body io.ReadCloser) error {
+	if _, err := io.Copy(io.Discard, body); err != nil {
+		if err = body.Close(); err != nil {
+			return err
+		}
+		return err
+	}
+	return body.Close()
+}
+
+func isConnectionError(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) || strings.Contains(err.Error(), "connection reset")
 }
 
 func isAuthenticationMethod(headers http.Header, method string) (ok bool, token []byte, err error) {
