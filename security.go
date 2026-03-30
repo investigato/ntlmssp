@@ -19,6 +19,10 @@ var (
 	clientSealing = concat([]byte("session key to client-to-server sealing key magic constant"), []byte{0x00})
 	serverSealing = concat([]byte("session key to server-to-client sealing key magic constant"), []byte{0x00})
 )
+var (
+	errChecksumMismatch = errors.New("checksum does not match")
+	errSeqNumMismatch   = errors.New("sequence number does not match")
+)
 
 type securitySource int
 
@@ -112,12 +116,12 @@ func (s *SecuritySession) Unwrap(b, signature []byte) ([]byte, error) {
 
 		// Compare the checksum portion of the signature
 		if !bytes.Equal(signature[offset:12], expected[offset:12]) {
-			return nil, errors.New("checksum does not match")
+			return nil, errChecksumMismatch
 		}
 
 		// Compare the sequence number portion of the signature
 		if !bytes.Equal(signature[12:16], expected[12:16]) {
-			return nil, errors.New("sequence number does not match")
+			return nil, errSeqNumMismatch
 		}
 
 		s.incomingSeqNum++

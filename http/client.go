@@ -21,6 +21,10 @@ import (
 var (
 	httpAuthenticateHeader = textproto.CanonicalMIMEHeaderKey("WWW-Authenticate")
 )
+var (
+	errChecksumMismatch = errors.New("checksum does not match")
+	errSeqNumMismatch   = errors.New("sequence number does not match")
+)
 
 type Client struct {
 	http       *http.Client
@@ -201,10 +205,16 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		} else {
 			if c.encryption {
 				if err := c.unwrap(resp); err != nil {
-					return nil, err
+					if !isSessionError(err) {
+						return nil, err
+					}
+					// session error: fall through to reset + re-auth
+				} else {
+					return resp, nil
 				}
+			} else {
+				return resp, nil
 			}
-			return resp, nil
 		}
 		c.ntlm.Reset()
 		req.Body = io.NopCloser(bytes.NewReader(savedBody))
@@ -289,7 +299,10 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	}
 	return resp, nil
 }
-
+func isSessionError(err error) bool {
+	return errors.Is(err, errChecksumMismatch) || errors.Is(err,
+		errSeqNumMismatch)
+}
 func saveBody(req *http.Request) ([]byte, error) {
 	if req.Body == nil {
 		return nil, nil
