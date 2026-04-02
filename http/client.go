@@ -187,9 +187,12 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	originalContentType := req.Header.Get(contentTypeHeader)
 
 	if c.ntlm.Complete() {
+
 		if err := c.wrap(req); err != nil {
+
 			return nil, err
 		}
+
 		resp, err = c.http.Do(req)
 		if err != nil {
 			if !isConnectionError(err) {
@@ -204,15 +207,19 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 			// fall through to reset + re-auth
 		} else {
 			if c.encryption {
+
 				if err := c.unwrap(resp); err != nil {
 					if !isSessionError(err) {
+
 						return nil, err
 					}
 					// session error: fall through to reset + re-auth
 				} else {
+
 					return resp, nil
 				}
 			} else {
+
 				return resp, nil
 			}
 		}

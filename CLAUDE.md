@@ -1,10 +1,10 @@
-# ntlmssp
+# ntlmssp - CLo's notes
 
 Pure Go NTLM SSP with NTLMv2, signing/sealing (RC4), and HTTP auth wrapper.
 
 ## Packages
 
-ntlmssp/   — Core NTLM client: negotiate, challenge, authenticate
+ntlmssp/   — Core NTLM client: negotiate, challenge, authenticate, can passthehash
 http/      — HTTP client wrapper with NTLM auth dance
 
 ## Core Client
@@ -42,4 +42,11 @@ Auth flow in Do():
 
 Encryption — wrap()/unwrap() use multipart/encrypted MIME
 
+PassTheHash integrated into authentication flow.
+
 Requirement: keep-alives must be enabled; NTLM is connection-oriented.
+
+## Changes/Fixes
+
+- Incorrect calculation on size of original body after encryption applied.
+- RoundTripper added.

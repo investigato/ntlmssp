@@ -16,6 +16,7 @@ type Client struct {
 	defaultFlags       uint32
 	domain             string
 	password           string
+	nthash             []byte
 	username           string
 	workstation        string
 	version            *Version
@@ -113,10 +114,11 @@ func SetDomain(domain string) func(*Client) error {
 	}
 }
 
-func SetUserInfo(username, password string) func(*Client) error {
+func SetUserInfo(username, password string, nthash []byte) func(*Client) error {
 	return func(c *Client) error {
 		c.username = username
 		c.password = password
+		c.nthash = nthash
 		return nil
 	}
 }
@@ -187,8 +189,13 @@ func (c *Client) processChallengeMessage(input []byte, bindings *ChannelBindings
 	if err != nil {
 		return nil, err
 	}
+	var lmChallengeResp []byte
 
-	lmChallengeResponse, err := lmChallengeResponse(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.password, c.domain, cm)
+	if len(c.nthash) > 0 {
+		lmChallengeResp, err = lmChallengeResponseFromHash(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.nthash, c.domain, cm)
+	} else {
+		lmChallengeResp, err = lmChallengeResponse(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.password, c.domain, cm)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -197,8 +204,13 @@ func (c *Client) processChallengeMessage(input []byte, bindings *ChannelBindings
 	if err != nil {
 		return nil, err
 	}
+	var ntChallengeResp, keyExchangeKey []byte
 
-	ntChallengeResponse, keyExchangeKey, err := ntChallengeResponse(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.password, c.domain, cm, lmChallengeResponse, *targetInfo, bindings)
+	if len(c.nthash) > 0 {
+		ntChallengeResp, keyExchangeKey, err = ntChallengeResponseFromHash(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.nthash, c.domain, cm, lmChallengeResp, *targetInfo, bindings)
+	} else {
+		ntChallengeResp, keyExchangeKey, err = ntChallengeResponse(c.negotiatedFlags, c.compatibilityLevel, clientChallenge, c.username, c.password, c.domain, cm, lmChallengeResp, *targetInfo, bindings)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -231,8 +243,8 @@ func (c *Client) processChallengeMessage(input []byte, bindings *ChannelBindings
 			messageHeader:  newMessageHeader(ntLmAuthenticate),
 			NegotiateFlags: c.negotiatedFlags,
 		},
-		LmChallengeResponse:       lmChallengeResponse,
-		NtChallengeResponse:       ntChallengeResponse,
+		LmChallengeResponse:       lmChallengeResp,
+		NtChallengeResponse:       ntChallengeResp,
 		DomainName:                c.domain,
 		UserName:                  c.username,
 		Workstation:               c.workstation,
