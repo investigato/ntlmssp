@@ -21,10 +21,6 @@ import (
 var (
 	httpAuthenticateHeader = textproto.CanonicalMIMEHeaderKey("WWW-Authenticate")
 )
-var (
-	errChecksumMismatch = errors.New("checksum does not match")
-	errSeqNumMismatch   = errors.New("sequence number does not match")
-)
 
 type Client struct {
 	http       *http.Client
@@ -149,11 +145,11 @@ func (c *Client) unwrap(resp *http.Response) error {
 			return nil
 		}
 
+		defer resp.Body.Close()
 		sealed, err := io.ReadAll(resp.Body)
 		if err != nil {
 			return err
 		}
-		defer resp.Body.Close()
 
 		data, newContentType, err := Unwrap(sealed, contentType)
 		if err != nil {
@@ -208,12 +204,12 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 		} else {
 			if c.encryption {
 
-				if err := c.unwrap(resp); err != nil {
-					if !isSessionError(err) {
+				if unwrapErr := c.unwrap(resp); unwrapErr != nil {
+					if !isSessionError(unwrapErr) {
 
-						return nil, err
+						return nil, unwrapErr
 					}
-					// session error: fall through to reset + re-auth
+					emptyAndCloseBody(req.Body)
 				} else {
 
 					return resp, nil
@@ -307,8 +303,9 @@ func (c *Client) Do(req *http.Request) (resp *http.Response, err error) {
 	return resp, nil
 }
 func isSessionError(err error) bool {
-	return errors.Is(err, errChecksumMismatch) || errors.Is(err,
-		errSeqNumMismatch)
+	return errors.Is(err, ntlmssp.ErrChecksumMismatch) ||
+		errors.Is(err, ntlmssp.ErrSeqNumMismatch) ||
+		errors.Is(err, io.ErrUnexpectedEOF)
 }
 func saveBody(req *http.Request) ([]byte, error) {
 	if req.Body == nil {
